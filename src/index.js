@@ -27,6 +27,11 @@ const { listCategories } = require("./categories");
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
+const host = process.env.HOST || "0.0.0.0";
+
+app.locals.ready = false;
+app.locals.startupError = null;
+app.locals.telegramClient = null;
 
 function isTransientNetworkError(err) {
   const message = String(err?.message || err || "").toLowerCase();
@@ -69,11 +74,37 @@ app.use((_req, res, next) => {
 app.use("/media", express.static(getMediaDir()));
 
 app.get("/health", async (_req, res) => {
-  try {
-    res.json({ ok: true, offersStored: await countOffers() });
-  } catch (err) {
-    res.status(503).json({ ok: false, error: err.message });
+  if (!app.locals.ready) {
+    return res.status(200).json({
+      ok: true,
+      ready: false,
+      status: "starting",
+      error: app.locals.startupError,
+    });
   }
+
+  try {
+    res.json({
+      ok: true,
+      ready: true,
+      offersStored: await countOffers(),
+    });
+  } catch (err) {
+    res.status(503).json({ ok: false, ready: true, error: err.message });
+  }
+});
+
+function requireReady(_req, res, next) {
+  if (app.locals.ready) return next();
+  return res.status(503).json({
+    error: "Service is still starting",
+    detail: app.locals.startupError,
+  });
+}
+
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  return requireReady(req, res, next);
 });
 
 app.get("/offers", async (req, res) => {
@@ -220,8 +251,7 @@ app.get("/offers/:id", async (req, res) => {
   }
 });
 
-async function main() {
-  installProcessErrorGuards();
+async function bootstrapServices() {
   console.log("[startup] connecting MongoDB");
   await connectDb();
 
@@ -242,20 +272,38 @@ async function main() {
 
   startPolling(client);
   startOfferCleanup();
+  app.locals.ready = true;
   console.log("[telegram] listening for channel posts");
+  return client;
+}
 
-  app.listen(port, () => {
-    console.log(`[api] http://localhost:${port}`);
+async function main() {
+  installProcessErrorGuards();
+
+  const server = app.listen(port, host, () => {
+    console.log(`[api] listening on http://${host}:${port}`);
     console.log(
       "[api] GET /offers  |  GET /categories  |  GET /channels  |  POST /sync  |  GET /health"
     );
   });
 
+  let client;
+  try {
+    client = await bootstrapServices();
+  } catch (err) {
+    app.locals.startupError = err?.message || String(err);
+    console.error("[startup] failed:", app.locals.startupError);
+    console.error(
+      "[startup] HTTP server is up; fix env/session and restart the service."
+    );
+  }
+
   const shutdown = async (signal) => {
     console.log(`\n[shutdown] ${signal}`);
+    server.close();
     stopPolling();
     stopOfferCleanup();
-    await client.disconnect();
+    if (client) await client.disconnect();
     await closeDb();
     process.exit(0);
   };
