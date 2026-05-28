@@ -1,0 +1,29 @@
+{
+  "name": "telegram-offers-api",
+  "version": "1.0.0",
+  "description": "Collect product offers from Telegram channels and expose them via REST API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "reset-db": "node scripts/reset-db.js",
+    "backfill-offers": "node scripts/backfill-offers.js",
+    "backfill-media": "node scripts/backfill-media.js"
+  },
+  "keywords": [
+    "telegram",
+    "offers",
+    "api"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "input": "^1.0.1",
+    "mongodb": "^7.2.0",
+    "telegram": "^2.26.22"
+  }
+}
