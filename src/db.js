@@ -49,7 +49,9 @@ async function connectDb() {
   await db.collection("offers").createIndex({ imageDedupeKey: 1 });
   await db.collection("channel_state").createIndex({ channelId: 1 }, { unique: true });
 
-  console.log("[mongodb] connected");
+  const dbName = db.databaseName;
+  const offersCount = await db.collection("offers").estimatedDocumentCount();
+  console.log(`[mongodb] connected (db: ${dbName}, offers: ${offersCount})`);
   return db;
 }
 

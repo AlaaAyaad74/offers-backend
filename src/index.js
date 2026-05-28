@@ -29,8 +29,12 @@ const app = express();
 const port = Number(process.env.PORT) || 3000;
 const host = process.env.HOST || "0.0.0.0";
 
+app.locals.dbReady = false;
+app.locals.telegramReady = false;
 app.locals.ready = false;
+app.locals.startupPhase = "init";
 app.locals.startupError = null;
+app.locals.telegramError = null;
 app.locals.telegramClient = null;
 
 function isTransientNetworkError(err) {
@@ -74,37 +78,55 @@ app.use((_req, res, next) => {
 app.use("/media", express.static(getMediaDir()));
 
 app.get("/health", async (_req, res) => {
-  if (!app.locals.ready) {
-    return res.status(200).json({
-      ok: true,
-      ready: false,
-      status: "starting",
-      error: app.locals.startupError,
-    });
+  const payload = {
+    ok: true,
+    ready: app.locals.dbReady && app.locals.telegramReady,
+    dbReady: app.locals.dbReady,
+    telegramReady: app.locals.telegramReady,
+    phase: app.locals.startupPhase,
+    error: app.locals.startupError,
+    telegramError: app.locals.telegramError,
+  };
+
+  if (!app.locals.dbReady) {
+    return res.status(200).json({ ...payload, status: "starting" });
   }
 
   try {
-    res.json({
-      ok: true,
-      ready: true,
+    return res.status(200).json({
+      ...payload,
+      status: app.locals.telegramReady ? "live" : "degraded",
       offersStored: await countOffers(),
     });
   } catch (err) {
-    res.status(503).json({ ok: false, ready: true, error: err.message });
+    return res.status(503).json({ ...payload, ok: false, error: err.message });
   }
 });
 
-function requireReady(_req, res, next) {
-  if (app.locals.ready) return next();
-  return res.status(503).json({
-    error: "Service is still starting",
-    detail: app.locals.startupError,
-  });
+function routeNeedsTelegram(path, method) {
+  return path === "/channels" || (path === "/sync" && method === "POST");
 }
 
 app.use((req, res, next) => {
-  if (req.path === "/health") return next();
-  return requireReady(req, res, next);
+  if (req.path === "/health" || req.path.startsWith("/media")) return next();
+
+  if (!app.locals.dbReady) {
+    return res.status(503).json({
+      error: "Database not ready yet",
+      phase: app.locals.startupPhase,
+      detail: app.locals.startupError,
+    });
+  }
+
+  if (routeNeedsTelegram(req.path, req.method) && !app.locals.telegramReady) {
+    return res.status(503).json({
+      error: "Telegram not ready yet",
+      phase: app.locals.startupPhase,
+      detail: app.locals.telegramError || app.locals.startupError,
+    });
+  }
+
+  return next();
 });
 
 app.get("/offers", async (req, res) => {
@@ -251,12 +273,31 @@ app.get("/offers/:id", async (req, res) => {
   }
 });
 
-async function bootstrapServices() {
+async function bootstrapMongo() {
+  app.locals.startupPhase = "mongodb";
   console.log("[startup] connecting MongoDB");
   await connectDb();
+  app.locals.dbReady = true;
+  startOfferCleanup();
+  console.log("[startup] MongoDB ready — /offers available");
+}
 
+async function bootstrapTelegram() {
+  app.locals.startupPhase = "telegram";
   console.log("[startup] connecting Telegram");
-  const client = await createClient();
+
+  const timeoutMs =
+    Number(process.env.TELEGRAM_CONNECT_TIMEOUT_MS) || 90_000;
+  const client = await Promise.race([
+    createClient(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Telegram connect timed out after ${timeoutMs}ms`)),
+        timeoutMs
+      )
+    ),
+  ]);
+
   app.locals.telegramClient = client;
   listenToChannels(client);
 
@@ -271,8 +312,9 @@ async function bootstrapServices() {
   }
 
   startPolling(client);
-  startOfferCleanup();
+  app.locals.telegramReady = true;
   app.locals.ready = true;
+  app.locals.startupPhase = "live";
   console.log("[telegram] listening for channel posts");
   return client;
 }
@@ -289,13 +331,24 @@ async function main() {
 
   let client;
   try {
-    client = await bootstrapServices();
+    await bootstrapMongo();
+    bootstrapTelegram()
+      .then((connectedClient) => {
+        client = connectedClient;
+      })
+      .catch((err) => {
+        app.locals.telegramError = err?.message || String(err);
+        app.locals.startupError = app.locals.telegramError;
+        app.locals.startupPhase = "telegram_failed";
+        console.error("[startup] Telegram failed:", app.locals.telegramError);
+        console.error(
+          "[startup] API stays up for /offers; fix TELEGRAM_SESSION and restart."
+        );
+      });
   } catch (err) {
     app.locals.startupError = err?.message || String(err);
-    console.error("[startup] failed:", app.locals.startupError);
-    console.error(
-      "[startup] HTTP server is up; fix env/session and restart the service."
-    );
+    app.locals.startupPhase = "mongodb_failed";
+    console.error("[startup] MongoDB failed:", app.locals.startupError);
   }
 
   const shutdown = async (signal) => {
