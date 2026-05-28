@@ -27,15 +27,12 @@ const {
 } = require("./store");
 
 const {
-
   extractImageUrlsFromText,
-
+  extractRemoteImageUrlsFromMessage,
   isDownloadableVisualMedia,
-
   mediaFileExtension,
-
   pickImageForOfferIndex,
-
+  shouldStoreMediaLocally,
 } = require("./media");
 
 
@@ -326,45 +323,29 @@ async function saveMessageVisualMedia(client, message, chat, { mediaIndex = 0 } 
  */
 
 async function extractMessageImages(client, message, chat, { downloadMedia = true } = {}) {
+  const remoteUrls = extractRemoteImageUrlsFromMessage(message);
 
-  const text = (message.message || "").trim();
-
-  const textUrls = extractImageUrlsFromText(text);
-
-  const imageUrls = [...textUrls];
-
-
-
-  if (downloadMedia && isDownloadableVisualMedia(message)) {
-
-    try {
-
-      const localPath = await saveMessageVisualMedia(client, message, chat);
-
-      if (localPath) {
-
-        imageUrls.unshift(localPath);
-
-      }
-
-    } catch (err) {
-
-      console.error(
-
-        `[media] ${normalizeChannelId(chat)} #${message.id}:`,
-
-        err.message
-
-      );
-
-    }
-
+  if (!shouldStoreMediaLocally() || !downloadMedia) {
+    return remoteUrls;
   }
 
+  const imageUrls = [...remoteUrls];
 
+  if (downloadMedia && isDownloadableVisualMedia(message)) {
+    try {
+      const localPath = await saveMessageVisualMedia(client, message, chat);
+      if (localPath) {
+        imageUrls.unshift(localPath);
+      }
+    } catch (err) {
+      console.error(
+        `[media] ${normalizeChannelId(chat)} #${message.id}:`,
+        err.message
+      );
+    }
+  }
 
   return [...new Set(imageUrls)];
-
 }
 
 
@@ -478,9 +459,8 @@ let syncInProgress = false;
 
 
 function mediaDownloadEnabled(flagName, defaultValue = true) {
-
+  if (!shouldStoreMediaLocally()) return false;
   return readBooleanEnv(flagName, defaultValue);
-
 }
 
 

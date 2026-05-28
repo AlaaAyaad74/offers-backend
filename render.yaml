@@ -29,10 +29,12 @@ services:
         value: "604800"
       - key: POLL_INTERVAL_SEC
         value: "30"
+      - key: STORE_MEDIA_LOCALLY
+        value: "false"
       - key: DOWNLOAD_MEDIA_ON_SYNC
-        value: "true"
+        value: "false"
       - key: DOWNLOAD_MEDIA_ON_POLL
-        value: "true"
+        value: "false"
       - key: API_ID
         sync: false
       - key: API_HASH

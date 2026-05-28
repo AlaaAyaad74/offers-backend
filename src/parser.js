@@ -5,8 +5,10 @@ const {
 } = require("./categories");
 const {
   extractImageUrlsFromText,
+  filterPublicImageUrls,
+  isLocalMediaPath,
   pickImageForOfferIndex,
-  toPublicAssetUrl,
+  resolveOfferImageForApi,
 } = require("./media");
 const {
   buildDescriptionDedupeKey,
@@ -500,7 +502,7 @@ function cleanDescription(text, { offerLink, price, salePercent } = {}) {
 /** Nested product fields stored on the offer document. */
 function buildClearPayload(offer) {
   const buyLink = offer.offerLink || null;
-  const imageUrl = toPublicAssetUrl(offer.imageUrl || null);
+  const imageUrl = resolveOfferImageForApi(offer);
   const category = toCategoryObject(offer.category);
 
   return {
@@ -534,10 +536,14 @@ function buildApiOffer(offer) {
 }
 
 function resolveOfferImageUrl({ imageUrls, imageUrl, jsonImage, text, index }) {
-  if (jsonImage) return jsonImage;
-  const fromList = pickImageForOfferIndex(imageUrls, index);
+  if (jsonImage && /^https?:\/\//i.test(jsonImage)) return jsonImage;
+
+  const publicList = filterPublicImageUrls(imageUrls);
+  const fromList = pickImageForOfferIndex(publicList, index);
   if (fromList) return fromList;
-  if (imageUrl) return imageUrl;
+
+  if (imageUrl && !isLocalMediaPath(imageUrl)) return imageUrl;
+
   const fromText = pickImageForOfferIndex(extractImageUrlsFromText(text), index);
   return fromText || null;
 }
@@ -673,6 +679,7 @@ function enrichStoredOffer(offer) {
     category: categorySlug,
   };
 
+  enriched.imageUrl = resolveOfferImageForApi(enriched);
   enriched.normalizedLink = normalizeOfferLink(enriched.offerLink);
   enriched.dedupeKey = buildDedupeKey(enriched);
   enriched.clear = buildClearPayload(enriched);
