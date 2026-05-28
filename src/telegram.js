@@ -89,6 +89,22 @@ function isTransientTelegramError(err) {
 
 }
 
+function isAuthKeyDuplicatedError(err) {
+  const message = String(err?.message || err?.errorMessage || "").toUpperCase();
+  return err?.code === 406 || message.includes("AUTH_KEY_DUPLICATED");
+}
+
+function explainTelegramConnectError(err) {
+  if (isAuthKeyDuplicatedError(err)) {
+    return new Error(
+      "Telegram AUTH_KEY_DUPLICATED: this session is already in use (often Render + local npm start). " +
+        "Stop the other instance, delete data/session.txt, run npm start once to log in again, " +
+        "then update TELEGRAM_SESSION on Render. Use only one running instance per session."
+    );
+  }
+  return err;
+}
+
 
 
 function loadSessionString() {
@@ -651,13 +667,24 @@ async function createClient() {
 
     }
 
+    if (isAuthKeyDuplicatedError(error)) {
+      console.error(
+        "[telegram] AUTH_KEY_DUPLICATED — stop Render (or local dev), reset session, use one instance only."
+      );
+      return;
+    }
+
     console.error("[telegram] client error:", error.message);
 
   };
 
 
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    throw explainTelegramConnectError(err);
+  }
 
 
 
