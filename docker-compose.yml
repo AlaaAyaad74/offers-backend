@@ -33,7 +33,9 @@ services:
       - .env
     environment:
       PORT: 3000
-      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-root}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/telegram_offers?authSource=admin
+      # Docker API should connect to the Docker Mongo service by default.
+      # You can override with DOCKER_MONGODB_URI when needed.
+      MONGODB_URI: ${DOCKER_MONGODB_URI:-mongodb://${MONGO_ROOT_USER:-root}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/telegram_offers?authSource=admin}
     volumes:
       - app_data:/app/data
     depends_on:

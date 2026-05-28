@@ -194,6 +194,22 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+### Local vs Production database
+
+- **Local (Docker):** keep `MONGODB_URI` pointing to the compose Mongo service:
+
+```env
+MONGODB_URI=mongodb://root:changeme@mongodb:27017/telegram_offers?authSource=admin
+```
+
+- **Production (Atlas):** set `MONGODB_URI` in your production environment to Atlas URI, for example:
+
+```env
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/telegram_offers?retryWrites=true&w=majority
+```
+
+The app reads `MONGODB_URI` from environment. No code change is needed between local and production.
+
 First-time Telegram login (interactive):
 
 ```bash

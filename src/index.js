@@ -28,6 +28,39 @@ const { listCategories } = require("./categories");
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
+function isTransientNetworkError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return (
+    message.includes("timeout") ||
+    message.includes("not connected") ||
+    message.includes("connection closed") ||
+    message.includes("disconnected")
+  );
+}
+
+function installProcessErrorGuards() {
+  process.on("unhandledRejection", (reason) => {
+    if (isTransientNetworkError(reason)) {
+      console.warn(
+        `[runtime] transient rejection ignored: ${
+          reason?.message || String(reason)
+        }`
+      );
+      return;
+    }
+    console.error("[runtime] unhandledRejection:", reason);
+  });
+
+  process.on("uncaughtException", (err) => {
+    if (isTransientNetworkError(err)) {
+      console.warn(`[runtime] transient exception ignored: ${err.message}`);
+      return;
+    }
+    console.error("[runtime] uncaughtException:", err);
+    process.exit(1);
+  });
+}
+
 app.use(express.json());
 app.use((_req, res, next) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -188,6 +221,7 @@ app.get("/offers/:id", async (req, res) => {
 });
 
 async function main() {
+  installProcessErrorGuards();
   await connectDb();
 
   const client = await createClient();
