@@ -194,6 +194,8 @@ This repo includes `render.yaml` with build/start commands and required env vars
 - `MONGODB_URI` (use MongoDB Atlas or another hosted MongoDB)
 - `TELEGRAM_SESSION` (required on Render because deploy/runtime is non-interactive)
 
+If startup logs show TLS/OpenSSL errors, it is usually a `MONGODB_URI` issue (wrong URI format, unescaped password characters, or blocked network access in your Mongo provider).
+
 ### How to get `TELEGRAM_SESSION`
 
 1. Run locally once with `npm start` and complete Telegram login prompts.

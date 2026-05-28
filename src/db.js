@@ -12,8 +12,28 @@ async function connectDb() {
     );
   }
 
-  client = new MongoClient(uri);
-  await client.connect();
+  const mongoOptions = {
+    serverSelectionTimeoutMS: Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS) || 15000,
+  };
+
+  if (String(process.env.MONGODB_TLS_ALLOW_INVALID_CERTIFICATES || "").toLowerCase() === "true") {
+    mongoOptions.tlsAllowInvalidCertificates = true;
+  }
+
+  if (String(process.env.MONGODB_TLS_ALLOW_INVALID_HOSTNAMES || "").toLowerCase() === "true") {
+    mongoOptions.tlsAllowInvalidHostnames = true;
+  }
+
+  client = new MongoClient(uri, mongoOptions);
+
+  try {
+    await client.connect();
+  } catch (err) {
+    const message = String(err?.message || err || "");
+    throw new Error(
+      `MongoDB connection failed: ${message}. Check MONGODB_URI (correct scheme/user/pass/db), URL-encode special chars in password, and ensure your Mongo provider allows connections from Render.`
+    );
+  }
   db = client.db();
 
   await db.collection("offers").createIndex({ id: 1 }, { unique: true });

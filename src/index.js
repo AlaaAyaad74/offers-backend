@@ -222,8 +222,10 @@ app.get("/offers/:id", async (req, res) => {
 
 async function main() {
   installProcessErrorGuards();
+  console.log("[startup] connecting MongoDB");
   await connectDb();
 
+  console.log("[startup] connecting Telegram");
   const client = await createClient();
   app.locals.telegramClient = client;
   listenToChannels(client);
@@ -263,6 +265,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[fatal]", err.message);
+  console.error("[fatal]", err?.stack || err?.message || err);
   process.exit(1);
 });
