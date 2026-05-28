@@ -6,6 +6,7 @@ const {
 const {
   extractImageUrlsFromText,
   pickImageForOfferIndex,
+  toPublicAssetUrl,
 } = require("./media");
 const {
   buildDescriptionDedupeKey,
@@ -499,7 +500,7 @@ function cleanDescription(text, { offerLink, price, salePercent } = {}) {
 /** Nested product fields stored on the offer document. */
 function buildClearPayload(offer) {
   const buyLink = offer.offerLink || null;
-  const imageUrl = offer.imageUrl || null;
+  const imageUrl = toPublicAssetUrl(offer.imageUrl || null);
   const category = toCategoryObject(offer.category);
 
   return {

@@ -93,12 +93,27 @@ function isLocalMediaPath(url) {
   return typeof url === "string" && url.startsWith("/media/");
 }
 
+/** Turn /media/... into https://your-api.onrender.com/media/... for frontends on another origin. */
+function toPublicAssetUrl(url) {
+  if (!url || typeof url !== "string") return url;
+  if (/^https?:\/\//i.test(url)) return url;
+
+  const base = String(
+    process.env.PUBLIC_API_URL || process.env.API_BASE_URL || ""
+  ).replace(/\/$/, "");
+  if (!base) return url;
+
+  if (url.startsWith("/")) return `${base}${url}`;
+  return `${base}/${url}`;
+}
+
 module.exports = {
   extractImageUrlsFromText,
   isDownloadableVisualMedia,
   isImageMime,
   isImageDocumentMedia,
   isLocalMediaPath,
+  toPublicAssetUrl,
   mediaFileExtension,
   pickImageForOfferIndex,
 };

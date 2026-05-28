@@ -13,6 +13,8 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: PUBLIC_API_URL
+        value: https://offers-backend-3owj.onrender.com
       - key: SYNC_ON_START
         value: "false"
       - key: POLL_INTERVAL_SEC
