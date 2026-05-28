@@ -183,6 +183,25 @@ Response fields on each offer: `repeated`, `repeatedReason` (`link` \| `image` \
 - Do not commit `data/session.txt` — it is your account session.
 - For production, run with Docker Compose or add backups for MongoDB.
 
+## Deploy on Render
+
+This repo includes `render.yaml` with build/start commands and required env vars.
+
+### Required secrets in Render
+
+- `API_ID`
+- `API_HASH`
+- `MONGODB_URI` (use MongoDB Atlas or another hosted MongoDB)
+- `TELEGRAM_SESSION` (required on Render because deploy/runtime is non-interactive)
+
+### How to get `TELEGRAM_SESSION`
+
+1. Run locally once with `npm start` and complete Telegram login prompts.
+2. Copy the full value from `data/session.txt`.
+3. Paste it into Render as `TELEGRAM_SESSION`.
+
+Without `TELEGRAM_SESSION`, the service cannot complete Telegram login on Render and startup fails by design.
+
 ## Docker Compose
 
 Runs the API + MongoDB together:

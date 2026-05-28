@@ -92,6 +92,9 @@ function isTransientTelegramError(err) {
 
 
 function loadSessionString() {
+  const sessionFromEnv = String(process.env.TELEGRAM_SESSION || "").trim();
+
+  if (sessionFromEnv) return sessionFromEnv;
 
   if (!fs.existsSync(SESSION_FILE)) return "";
 
@@ -102,6 +105,7 @@ function loadSessionString() {
 
 
 function saveSession(client) {
+  if (String(process.env.TELEGRAM_SESSION || "").trim()) return;
 
   fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
 
@@ -658,6 +662,13 @@ async function createClient() {
 
 
   if (!(await client.isUserAuthorized())) {
+    const isInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
+    if (!isInteractiveTerminal) {
+      throw new Error(
+        "Telegram session is missing. In non-interactive environments (like Render), set TELEGRAM_SESSION to a previously saved StringSession."
+      );
+    }
 
     console.log("[telegram] First run: log in with your Telegram account.");
 

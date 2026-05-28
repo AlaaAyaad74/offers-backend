@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: telegram-offers-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SYNC_ON_START
+        value: "false"
+      - key: POLL_INTERVAL_SEC
+        value: "30"
+      - key: DOWNLOAD_MEDIA_ON_SYNC
+        value: "true"
+      - key: DOWNLOAD_MEDIA_ON_POLL
+        value: "true"
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: TELEGRAM_SESSION
+        sync: false
+      - key: MONGODB_URI
+        sync: false
