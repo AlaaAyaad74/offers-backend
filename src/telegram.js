@@ -929,6 +929,32 @@ function getMediaDir() {
 
 }
 
+/** Re-download a channel photo from Telegram when missing on disk (e.g. after Render redeploy). */
+async function ensureMediaFile(client, filename) {
+  const safeName = path.basename(String(filename || ""));
+  if (!safeName) return null;
+
+  const filepath = path.join(MEDIA_DIR, safeName);
+  if (fs.existsSync(filepath)) return filepath;
+
+  const match = safeName.match(/^(-100\d+)_(\d+)(?:_(\d+))?\.[a-z0-9]+$/i);
+  if (!match) return null;
+
+  const channelId = match[1];
+  const messageId = Number(match[2]);
+  const mediaIndex = match[3] ? Number(match[3]) : 0;
+
+  const entity = await client.getEntity(channelId);
+  const messages = await client.getMessages(entity, { ids: [messageId] });
+  const message = messages?.[0];
+  if (!message) return null;
+
+  const chat = await message.getChat();
+  await saveMessageVisualMedia(client, message, chat, { mediaIndex });
+
+  return fs.existsSync(filepath) ? filepath : null;
+}
+
 
 
 module.exports = {
@@ -944,6 +970,7 @@ module.exports = {
   pollRecentMessages,
 
   getMediaDir,
+  ensureMediaFile,
 
   listJoinedChannels,
 

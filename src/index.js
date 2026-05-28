@@ -1,5 +1,7 @@
 require("dotenv").config();
 
+const path = require("path");
+const fs = require("fs");
 const express = require("express");
 const { connectDb, closeDb } = require("./db");
 const {
@@ -8,6 +10,7 @@ const {
   startPolling,
   stopPolling,
   getMediaDir,
+  ensureMediaFile,
   listJoinedChannels,
   syncAllChannels,
   isSyncInProgress,
@@ -83,14 +86,52 @@ app.use((req, res, next) => {
 });
 
 const mediaCacheSec = readTtlSeconds("MEDIA_HTTP_CACHE_SEC", 604800);
-app.use(
-  "/media",
-  express.static(getMediaDir(), {
-    maxAge: mediaCacheSec * 1000,
-    immutable: true,
-    etag: true,
-  })
-);
+
+app.get("/media/:filename", async (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const mediaDir = getMediaDir();
+  let filepath = path.join(mediaDir, filename);
+
+  const sendMediaFile = () => {
+    res.set("Cache-Control", `public, max-age=${mediaCacheSec}, immutable`);
+    res.sendFile(path.resolve(filepath));
+  };
+
+  if (fs.existsSync(filepath)) {
+    return sendMediaFile();
+  }
+
+  const client = app.locals.telegramClient;
+  if (app.locals.telegramReady && client) {
+    try {
+      const saved = await ensureMediaFile(client, filename);
+      if (saved && fs.existsSync(saved)) {
+        filepath = saved;
+        return sendMediaFile();
+      }
+    } catch (err) {
+      console.error(`[media] on-demand ${filename}:`, err.message);
+    }
+  }
+
+  const idMatch = filename.match(/^(-100\d+)_(\d+)(?:_\d+)?\./i);
+  if (idMatch && app.locals.dbReady) {
+    try {
+      const offer = await getOffer(`${idMatch[1]}_${idMatch[2]}`);
+      const external = offer?.clear?.image;
+      if (external && /^https?:\/\//i.test(external)) {
+        return res.redirect(302, external);
+      }
+    } catch {
+      // fall through to 404
+    }
+  }
+
+  res.status(404).json({
+    error: "Media file not found",
+    hint: "Run POST /sync?downloadMedia=true on Render or wait for Telegram reconnect.",
+  });
+});
 
 app.get("/health", async (_req, res) => {
   const payload = {
