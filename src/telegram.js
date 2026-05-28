@@ -29,6 +29,7 @@ const {
 const {
   extractImageUrlsFromText,
   extractRemoteImageUrlsFromMessage,
+  buildMediaProxyUrl,
   isDownloadableVisualMedia,
   mediaFileExtension,
   pickImageForOfferIndex,
@@ -325,11 +326,25 @@ async function saveMessageVisualMedia(client, message, chat, { mediaIndex = 0 } 
 async function extractMessageImages(client, message, chat, { downloadMedia = true } = {}) {
   const remoteUrls = extractRemoteImageUrlsFromMessage(message);
 
-  if (!shouldStoreMediaLocally() || !downloadMedia) {
+  if (remoteUrls.length > 0) {
     return remoteUrls;
   }
 
-  const imageUrls = [...remoteUrls];
+  if (isDownloadableVisualMedia(message)) {
+    const chatId = normalizeChannelId(chat);
+    const proxy = buildMediaProxyUrl(
+      chatId,
+      message.id,
+      mediaFileExtension(message)
+    );
+    if (proxy) return [proxy];
+  }
+
+  if (!shouldStoreMediaLocally() || !downloadMedia) {
+    return [];
+  }
+
+  const imageUrls = [];
 
   if (downloadMedia && isDownloadableVisualMedia(message)) {
     try {

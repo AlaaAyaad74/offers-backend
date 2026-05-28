@@ -97,12 +97,35 @@ function shouldStoreMediaLocally() {
   return String(process.env.STORE_MEDIA_LOCALLY || "false").toLowerCase() === "true";
 }
 
+function getApiMediaBaseUrl() {
+  return String(
+    process.env.PUBLIC_API_URL || process.env.API_BASE_URL || ""
+  ).replace(/\/$/, "");
+}
+
+function buildMediaFilename(channelId, messageId, ext = ".jpg", mediaIndex = 0) {
+  const suffix = mediaIndex > 0 ? `_${mediaIndex}` : "";
+  return `${channelId}_${messageId}${suffix}${ext}`;
+}
+
+/** HTTPS link served by this API; image is fetched from Telegram on first request. */
+function buildMediaProxyUrl(channelId, messageId, ext = ".jpg", mediaIndex = 0) {
+  const base = getApiMediaBaseUrl();
+  const path = `/media/${buildMediaFilename(channelId, messageId, ext, mediaIndex)}`;
+  return base ? `${base}${path}` : path;
+}
+
+function isApiMediaProxyUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const base = getApiMediaBaseUrl();
+  if (base && url.startsWith(`${base}/media/`)) return true;
+  return isLocalMediaPath(url);
+}
+
 function isPublicImageUrl(url) {
-  return (
-    typeof url === "string" &&
-    /^https?:\/\//i.test(url) &&
-    !isLocalMediaPath(url)
-  );
+  if (!url || typeof url !== "string") return false;
+  if (isLocalMediaPath(url)) return false;
+  return /^https?:\/\//i.test(url) || isApiMediaProxyUrl(url);
 }
 
 function filterPublicImageUrls(urls) {
@@ -144,13 +167,27 @@ function extractRemoteImageUrlsFromMessage(message) {
   return filterPublicImageUrls([...found]);
 }
 
-/** API image: HTTPS only unless local media mode is enabled. */
+function offerHasTelegramVisualMedia(offer) {
+  const type = offer?.mediaType || "";
+  return (
+    type === "MessageMediaPhoto" ||
+    type === "MessageMediaDocument" ||
+    type === "MessageMediaWebPage" ||
+    isLocalMediaPath(offer?.imageUrl) ||
+    isApiMediaProxyUrl(offer?.imageUrl)
+  );
+}
+
+/** API image: direct HTTPS from post, or proxy link to /media (Telegram on-demand). */
 function resolveOfferImageForApi(offer) {
+  if (isLocalMediaPath(offer?.imageUrl)) {
+    return toPublicAssetUrl(offer.imageUrl);
+  }
+
   const candidates = filterPublicImageUrls([
     offer?.imageUrl,
     ...(offer?.imageUrls || []),
   ]);
-
   if (candidates.length > 0) {
     return candidates[0];
   }
@@ -164,8 +201,15 @@ function resolveOfferImageForApi(offer) {
     return fromText[0];
   }
 
-  if (shouldStoreMediaLocally() && isLocalMediaPath(offer?.imageUrl)) {
-    return toPublicAssetUrl(offer.imageUrl);
+  if (offer?.channelId && offer?.messageId != null && offerHasTelegramVisualMedia(offer)) {
+    const ext =
+      String(offer.imageUrl || "").match(/\.[a-z0-9]+$/i)?.[0] || ".jpg";
+    return buildMediaProxyUrl(
+      offer.channelId,
+      offer.messageId,
+      ext,
+      offer.offerIndex || 0
+    );
   }
 
   return null;
@@ -193,8 +237,12 @@ module.exports = {
   isImageDocumentMedia,
   isLocalMediaPath,
   isPublicImageUrl,
+  isApiMediaProxyUrl,
   filterPublicImageUrls,
   shouldStoreMediaLocally,
+  buildMediaProxyUrl,
+  buildMediaFilename,
+  offerHasTelegramVisualMedia,
   resolveOfferImageForApi,
   toPublicAssetUrl,
   mediaFileExtension,

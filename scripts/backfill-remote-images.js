@@ -8,7 +8,9 @@ const { connectDb, closeDb, getDb } = require("../src/db");
 const { createClient } = require("../src/telegram");
 const {
   extractRemoteImageUrlsFromMessage,
+  buildMediaProxyUrl,
   pickImageForOfferIndex,
+  offerHasTelegramVisualMedia,
 } = require("../src/media");
 const { enrichStoredOffer } = require("../src/parser");
 const { clearResponseCache } = require("../src/responseCache");
@@ -20,11 +22,18 @@ async function main() {
   const client = await createClient();
   const collection = getDb().collection("offers");
 
-  let cursor = collection.find({ imageUrl: { $regex: "^/media/" } });
+  let cursor = collection.find({
+    $or: [
+      { imageUrl: { $regex: "^/media/" } },
+      { imageUrl: null },
+      { imageUrl: "" },
+      { "clear.image": null },
+    ],
+  });
   if (limit > 0) cursor = cursor.limit(limit);
 
   const offers = await cursor.toArray();
-  console.log(`[backfill-remote] ${offers.length} offer(s) with /media/ paths`);
+  console.log(`[backfill-remote] ${offers.length} offer(s) to fix`);
 
   let updated = 0;
   let skipped = 0;
@@ -44,12 +53,23 @@ async function main() {
       console.warn(`[backfill-remote] ${offer.id}: ${err.message}`);
     }
 
+    if (!imageUrl && offerHasTelegramVisualMedia(offer)) {
+      const ext =
+        String(offer.imageUrl || "").match(/\.[a-z0-9]+$/i)?.[0] || ".jpg";
+      imageUrl = buildMediaProxyUrl(
+        offer.channelId,
+        offer.messageId,
+        ext,
+        offer.offerIndex || 0
+      );
+    }
+
     const enriched = enrichStoredOffer({
       ...offer,
       imageUrl: imageUrl || offer.imageUrl,
     });
 
-    if (!enriched.imageUrl || enriched.imageUrl.startsWith("/media/")) {
+    if (!enriched.clear?.image) {
       skipped += 1;
       continue;
     }
@@ -59,7 +79,7 @@ async function main() {
       { $set: { imageUrl: enriched.imageUrl, clear: enriched.clear } }
     );
     updated += 1;
-    console.log(`[backfill-remote] ${offer.id} → ${enriched.imageUrl}`);
+    console.log(`[backfill-remote] ${offer.id} → ${enriched.clear.image}`);
   }
 
   clearResponseCache();
