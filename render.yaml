@@ -16,7 +16,17 @@ services:
       - key: PUBLIC_API_URL
         value: https://offers-backend-3owj.onrender.com
       - key: SYNC_ON_START
-        value: "false"
+        value: "true"
+      - key: OFFERS_RESPONSE_CACHE_SEC
+        value: "20"
+      - key: POLL_BATCH_SIZE
+        value: "50"
+      - key: TELEGRAM_RECONNECT_INTERVAL_SEC
+        value: "120"
+      - key: OFFERS_HTTP_CACHE_SEC
+        value: "30"
+      - key: MEDIA_HTTP_CACHE_SEC
+        value: "604800"
       - key: POLL_INTERVAL_SEC
         value: "30"
       - key: DOWNLOAD_MEDIA_ON_SYNC

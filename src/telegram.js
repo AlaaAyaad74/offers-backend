@@ -755,26 +755,16 @@ async function pollRecentMessages(client) {
 
     try {
 
+      const entity = await client.getEntity(channel.id);
       const seeded = await isChannelSeeded(channel.id);
-
-      if (!seeded) continue;
-
-
-
       const cursor = await getChannelCursor(channel.id);
 
-      const entity = await client.getEntity(channel.id);
-
-
-
       const result = await fetchMessagesSince(client, entity, channel.id, {
-
-        sinceId: cursor,
-
-        limit: pollLimit,
-
+        sinceId: seeded ? cursor : 0,
+        limit: seeded
+          ? pollLimit
+          : Number(process.env.SYNC_RECENT_PER_CHANNEL) || 100,
         downloadMedia,
-
       });
 
 
@@ -846,9 +836,11 @@ function startPolling(client) {
 
 
   pollTimer = setInterval(run, intervalSec * 1000);
+  run().catch((err) => console.error("[poll] initial run failed:", err.message));
 
-  console.log(`[poll] every ${intervalSec}s — new messages only (after initial sync)`);
-
+  console.log(
+    `[poll] every ${intervalSec}s — new messages only (runs immediately on start)`
+  );
 }
 
 
@@ -907,16 +899,12 @@ function listenToChannels(client) {
 
 
 
+        await updateChannelCursor(channelId, message.id);
+
         if (offers.length > 0) {
-
-          await updateChannelCursor(channelId, message.id);
-
           console.log(
-
             `[live] ${offers[0].channelTitle}: #${message.id} (+${offers.length})`
-
           );
-
         }
 
       } catch (err) {

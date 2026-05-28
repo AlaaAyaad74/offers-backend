@@ -13,11 +13,15 @@ const {
   isSyncInProgress,
 } = require("./telegram");
 const {
-  listOffers,
+  queryOffersPage,
   getOffer,
   countOffers,
-  countOffersFiltered,
 } = require("./store");
+const {
+  getCached,
+  readTtlSeconds,
+  clearResponseCache,
+} = require("./responseCache");
 const {
   resolvePagination,
   buildPaginationMeta,
@@ -71,11 +75,22 @@ function installProcessErrorGuards() {
 }
 
 app.use(express.json());
-app.use((_req, res, next) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/media")) {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  }
   next();
 });
-app.use("/media", express.static(getMediaDir()));
+
+const mediaCacheSec = readTtlSeconds("MEDIA_HTTP_CACHE_SEC", 604800);
+app.use(
+  "/media",
+  express.static(getMediaDir(), {
+    maxAge: mediaCacheSec * 1000,
+    immutable: true,
+    etag: true,
+  })
+);
 
 app.get("/health", async (_req, res) => {
   const payload = {
@@ -86,6 +101,8 @@ app.get("/health", async (_req, res) => {
     phase: app.locals.startupPhase,
     error: app.locals.startupError,
     telegramError: app.locals.telegramError,
+    pollIntervalSec: Number(process.env.POLL_INTERVAL_SEC) || 30,
+    syncOnStart: String(process.env.SYNC_ON_START || "").toLowerCase() === "true",
   };
 
   if (!app.locals.dbReady) {
@@ -161,30 +178,45 @@ app.get("/offers", async (req, res) => {
       category,
     };
 
-    const [data, total, totalStored, rawMatching] = await Promise.all([
-      listOffers({
-        ...filters,
-        limit: pagination.limit,
-        offset: pagination.offset,
-      }),
-      countOffersFiltered(filters),
-      countOffers(),
-      countOffersFiltered({ ...filters, dedupe: false }),
-    ]);
-
     const dedupeEnabled =
       dedupe !== "false" &&
       String(process.env.OFFERS_DEDUPE || "true").toLowerCase() !== "false";
 
-    res.json({
-      ...buildPaginationMeta({ total, ...pagination }),
-      count: total,
-      returned: data.length,
-      totalStored,
-      deduplicated: dedupeEnabled,
-      duplicatesRemoved: dedupeEnabled ? Math.max(rawMatching - total, 0) : 0,
-      data,
+    const cacheKey = JSON.stringify({ filters, pagination, dedupeEnabled });
+    const offersCacheSec = readTtlSeconds("OFFERS_RESPONSE_CACHE_SEC", 45);
+    const totalStoredCacheSec = readTtlSeconds("OFFERS_TOTAL_STORED_CACHE_SEC", 120);
+
+    const payload = await getCached(cacheKey, offersCacheSec, async () => {
+      const { data, total, rawMatching, duplicatesRemoved } = await queryOffersPage({
+        ...filters,
+        limit: pagination.limit,
+        offset: pagination.offset,
+      });
+
+      const totalStored = await getCached(
+        "offers:totalStored",
+        totalStoredCacheSec,
+        () => countOffers()
+      );
+
+      return {
+        ...buildPaginationMeta({ total, ...pagination }),
+        count: total,
+        returned: data.length,
+        totalStored,
+        deduplicated: dedupeEnabled,
+        duplicatesRemoved:
+          duplicatesRemoved ?? Math.max(rawMatching - total, 0),
+        data,
+      };
     });
+
+    const cacheMaxAge = readTtlSeconds("OFFERS_HTTP_CACHE_SEC", 30);
+    if (cacheMaxAge > 0) {
+      res.set("Cache-Control", `public, max-age=${cacheMaxAge}`);
+    }
+
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -255,6 +287,7 @@ app.post("/sync", async (req, res) => {
       downloadMedia,
     });
 
+    clearResponseCache();
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -330,6 +363,30 @@ async function main() {
   });
 
   let client;
+  let telegramReconnectTimer;
+
+  const scheduleTelegramReconnect = () => {
+    if (telegramReconnectTimer) return;
+    const delaySec =
+      Number(process.env.TELEGRAM_RECONNECT_INTERVAL_SEC) || 120;
+    telegramReconnectTimer = setTimeout(async () => {
+      telegramReconnectTimer = undefined;
+      if (app.locals.telegramReady) return;
+      console.log("[startup] retrying Telegram connection...");
+      try {
+        client = await bootstrapTelegram();
+        app.locals.telegramError = null;
+        app.locals.startupError = null;
+      } catch (err) {
+        app.locals.telegramError = err?.message || String(err);
+        app.locals.startupError = app.locals.telegramError;
+        app.locals.startupPhase = "telegram_failed";
+        console.error("[startup] Telegram retry failed:", app.locals.telegramError);
+        scheduleTelegramReconnect();
+      }
+    }, delaySec * 1000);
+  };
+
   try {
     await bootstrapMongo();
     bootstrapTelegram()
@@ -344,6 +401,7 @@ async function main() {
         console.error(
           "[startup] API stays up for /offers; fix TELEGRAM_SESSION and restart."
         );
+        scheduleTelegramReconnect();
       });
   } catch (err) {
     app.locals.startupError = err?.message || String(err);
@@ -353,6 +411,7 @@ async function main() {
 
   const shutdown = async (signal) => {
     console.log(`\n[shutdown] ${signal}`);
+    if (telegramReconnectTimer) clearTimeout(telegramReconnectTimer);
     server.close();
     stopPolling();
     stopOfferCleanup();

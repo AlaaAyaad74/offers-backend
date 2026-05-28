@@ -1,4 +1,5 @@
 const { getDb } = require("./db");
+const { clearResponseCache } = require("./responseCache");
 const { normalizeOfferLink, buildDedupeKey, buildApiOffer } = require("./parser");
 const {
   collapseDuplicateOffers,
@@ -109,6 +110,7 @@ async function addOffer(offer) {
     .collection(COLLECTION)
     .updateOne({ id: offer.id }, { $set: offer }, { upsert: true });
 
+  clearResponseCache();
   return offer;
 }
 
@@ -246,17 +248,8 @@ async function countOffersFiltered(filters = {}) {
   return offers.length;
 }
 
-async function listOffers(filters = {}) {
-  const { limit, offset = 0, dedupe, sort, ...queryFilters } = filters;
-  const filter = buildFilter(queryFilters);
-  const max = resolveLimit(limit);
-  const skip = Math.max(Number(offset) || 0, 0);
-  const sortOrder = resolveSortOrder(sort);
-
-  const dedupeEnabled = isDedupeEnabled(dedupe);
+async function fetchOfferRows(filter, sortOrder, dedupeEnabled) {
   const scanLimit = Number(process.env.OFFERS_DEDUPE_SCAN_LIMIT) || 10000;
-
-  let rows;
 
   if (dedupeEnabled) {
     const pipeline = [
@@ -267,19 +260,40 @@ async function listOffers(filters = {}) {
       { $sort: sortOrder },
       { $limit: scanLimit },
     ];
-    rows = await getDb().collection(COLLECTION).aggregate(pipeline).toArray();
-  } else {
-    let cursor = getDb()
-      .collection(COLLECTION)
-      .find(filter)
-      .sort(sortOrder)
-      .limit(scanLimit);
-    rows = await cursor.toArray();
+    return getDb().collection(COLLECTION).aggregate(pipeline).toArray();
   }
 
-  const { offers } = applyContentDedupe(rows, dedupeEnabled);
-  const page = offers.slice(skip, max > 0 ? skip + max : undefined);
-  return page.map(toApiOffer);
+  return getDb()
+    .collection(COLLECTION)
+    .find(filter)
+    .sort(sortOrder)
+    .limit(scanLimit)
+    .toArray();
+}
+
+/** One DB scan for list + deduped total (avoids duplicate heavy count queries). */
+async function queryOffersPage(filters = {}) {
+  const { limit, offset = 0, dedupe, sort, ...queryFilters } = filters;
+  const filter = buildFilter(queryFilters);
+  const max = resolveLimit(limit);
+  const skip = Math.max(Number(offset) || 0, 0);
+  const sortOrder = resolveSortOrder(sort);
+  const dedupeEnabled = isDedupeEnabled(dedupe);
+
+  const rows = await fetchOfferRows(filter, sortOrder, dedupeEnabled);
+  const rawMatching = rows.length;
+  const { offers, duplicatesRemoved } = applyContentDedupe(rows, dedupeEnabled);
+  const total = offers.length;
+  const data = offers
+    .slice(skip, max > 0 ? skip + max : undefined)
+    .map(toApiOffer);
+
+  return { data, total, rawMatching, duplicatesRemoved };
+}
+
+async function listOffers(filters = {}) {
+  const { data } = await queryOffersPage(filters);
+  return data;
 }
 
 async function getOffer(id) {
@@ -383,6 +397,7 @@ async function deleteExpiredOffers() {
 module.exports = {
   addOffer,
   listOffers,
+  queryOffersPage,
   getOffer,
   countOffers,
   countOffersFiltered,
